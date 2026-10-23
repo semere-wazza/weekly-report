@@ -440,6 +440,9 @@ def generate_email_with_gemini(grouped, pr_grouped):
         candidates = resp.json().get("candidates", [])
         if not candidates:
             return None
+        if candidates[0].get("finishReason") == "MAX_TOKENS":
+            print("WARNING: Gemini summarization truncated (hit max tokens), falling back", file=sys.stderr)
+            return None
         parts = candidates[0]["content"]["parts"]
         text = "".join(p.get("text", "") for p in parts)
         return text.strip()
@@ -465,13 +468,17 @@ def generate_email_with_groq(grouped, pr_grouped):
             },
             json={
                 "model": "openai/gpt-oss-120b",
-                "max_tokens": 1000,
+                "max_tokens": 4000,
                 "messages": [{"role": "user", "content": prompt}],
             },
         )
         if resp is None or resp.status_code != 200:
             return None
-        text = resp.json()["choices"][0]["message"]["content"]
+        choice = resp.json()["choices"][0]
+        if choice.get("finish_reason") == "length":
+            print("WARNING: Groq summarization truncated (hit max_tokens), falling back", file=sys.stderr)
+            return None
+        text = choice["message"]["content"]
         return text.strip()
     except Exception as e:
         print(f"WARNING: Groq summarization failed: {e}", file=sys.stderr)
@@ -496,13 +503,17 @@ def generate_email_with_claude(grouped, pr_grouped):
             },
             json={
                 "model": "claude-sonnet-5",
-                "max_tokens": 1000,
+                "max_tokens": 4000,
                 "messages": [{"role": "user", "content": prompt}],
             },
         )
         if resp is None or resp.status_code != 200:
             return None
-        content = resp.json()["content"]
+        data = resp.json()
+        if data.get("stop_reason") == "max_tokens":
+            print("WARNING: Claude summarization truncated (hit max_tokens), falling back", file=sys.stderr)
+            return None
+        content = data["content"]
         text = "".join(block.get("text", "") for block in content if block.get("type") == "text")
         return text.strip()
     except Exception as e:
